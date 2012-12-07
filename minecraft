@@ -1,0 +1,178 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          minecraft
+# Required-Start:    $local_fs $remote_fs $network $syslog
+# Required-Stop:     $local_fs $remote_fs $network $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Minecraft server
+# Description:       Runs the Minecraft server
+### END INIT INFO
+
+# Author: Will Boyd <whboyd@wesleyan.edu>
+
+# PATH should only include /usr/* if it runs after the mountnfs.sh script
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+DESC="Minecraft server"
+NAME=minecraft
+PIDFILE=/var/run/$NAME.pid
+JVM=`which java`
+MCHOME=/home/minecraft
+
+# Load the VERBOSE setting and other rcS variables
+. /lib/init/vars.sh
+
+# Define LSB log_* functions.
+# Depend on lsb-base (>= 3.2-14) to ensure that this file is present
+# and status_of_proc is working.
+. /lib/lsb/init-functions
+
+#
+# Function that checks the server's status
+#
+do_status()
+{
+	# Return
+	#	0 if daemon is running
+	#	1 if daemon is stopped
+
+	# Ensure that PID file and open ports match up
+	PID=`cat ${PIDFILE} 2> /dev/null`
+	if [ "`readlink -enq /proc/${PID}/exe`" = "`readlink -enq ${JVM}`" ]; then
+		if [ "`netstat -tlpn|awk '$4==":::25565"{print substr($7,1,index($7,"/")-1)}' 2> /dev/null`" = "$PID" ]; then
+			return 0
+		fi
+	fi
+	return 1
+}
+
+
+#
+# Function that starts the server
+#
+do_start()
+{
+	# Return
+	#   0 if daemon has been started
+	#   1 if daemon was already running
+	#   2 if daemon could not be started
+
+	if do_status; then return 1; fi
+
+	# Check for a present, executable JVM
+	if [ ! -x "${JVM}" ]; then
+		echo "Error: missing or non-executable JVM"
+		return 2
+	fi
+
+	# Check for an installed Minecraft server
+	if [ -f ${MCHOME}/minecraft_server.jar ]; then
+		MC=${MCHOME}/minecraft_server.jar
+		MCDESC="vanilla"
+	elif [ -f ${MCHOME}/craftbukkit.jar ]; then
+		MC=${MCHOME}/craftbukkit.jar
+		MCDESC="craftbukkit"
+	else
+		echo "Error: cannot find minecraft server jar"
+		return 2
+	fi
+
+	cdir=${PWD}
+	cd ${MCHOME}
+	PID=`su minecraft -c "nohup ${JVM} -jar ${MC} &> /dev/null & echo \\$! " `
+	cd ${cdir}
+	sleep 5
+	if [ -d "/proc/${PID}" ]; then
+		echo ${PID} > ${PIDFILE} 
+		echo "Using ${MCDESC} server jar, started server in ${MCHOME} at `date`"
+		return 0
+	fi
+	return 2
+}
+
+#
+# Function that stops the daemon/service
+#
+do_stop()
+{
+	# Return
+	#   0 if daemon has been stopped
+	#   1 if daemon was already stopped
+	#   2 if daemon could not be stopped
+
+	PID=`cat ${PIDFILE} 2> /dev/null`
+	SOCKET_HOLDER=`netstat -tlpn|awk '$4==":::25565"{print substr($7,1,index($7,"/")-1)}'`
+	EXECUTABLE=`readlink -enq /proc/${PID}/exe`
+
+	if [ "${PID}" != "${SOCKET_HOLDER}" ]; then
+		# Mismatch somewhere. Better not.
+		echo "Error: PIDfile (${PID}) and socket 25565 holder (${SOCKET_HOLDER}) do not match."
+		return 2
+	fi
+
+	if [ "${EXECUTABLE}" != "`readlink -enq ${JVM}`" ]; then
+		echo "Error: PIDfile executable (${EXECUTABLE}) and system default JVM (${JVM}) do not match."
+		return 2
+	fi
+
+	kill -TERM ${PID}
+	sleep 1
+	if [ -d "/proc/${PID}" ]; then
+		sleep 5
+		kill -KILL ${PID}
+	fi
+	rm -f ${PIDFILE}
+	return 0
+
+}
+
+
+case "$1" in
+  start)
+	[ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+	do_start
+	case "$?" in
+		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+	esac
+	;;
+  stop)
+	[ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+	do_stop
+	case "$?" in
+		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+	esac
+	;;
+  status)
+    do_status
+	case "$?" in
+	    0) echo "Minecraft server running." && exit 0 ;;
+		*) echo "Minecraft server not running." && exit 0 ;;
+	esac
+    ;;
+  restart|force-reload)
+	log_daemon_msg "Restarting $DESC" "$NAME"
+	do_stop
+	case "$?" in
+	  0|1)
+		do_start
+		case "$?" in
+			0) log_end_msg 0 ;;
+			1) log_end_msg 1 ;; # Old process is still running
+			*) log_end_msg 1 ;; # Failed to start
+		esac
+		;;
+	  *)
+	  	# Failed to stop
+		log_end_msg 1
+		;;
+	esac
+	;;
+  *)
+	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload}" >&2
+	exit 3
+	;;
+esac
+
+:
