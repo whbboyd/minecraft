@@ -1,0 +1,7 @@
+Utilities and scripts for running a Minecraft server on Linux
+
+This repository contains the following items:
+
+  - minecraft: an init script to run minecraft as a service. Tested on Debian Squeeze.
+
+
